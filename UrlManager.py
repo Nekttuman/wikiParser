@@ -1,11 +1,12 @@
 from PyQt5.QtCore import QUrl, QUrlQuery
 
+
 class UrlManager:
-    _baseUrl = "https://ru.wikipedia.org/w/"
+    _BASE_URL = "https://ru.wikipedia.org/w/"
 
     @staticmethod
     def createPageUrl(pageid: int) -> str:
-        url = QUrl(UrlManager._baseUrl + "index.php")
+        url = QUrl(UrlManager._BASE_URL + "index.php")
 
         query = QUrlQuery()
         query.addQueryItem('curid', str(pageid))
@@ -14,8 +15,8 @@ class UrlManager:
         return url.toString()
 
     @staticmethod
-    def getSearchResponceUrl(userInput: str) -> QUrl:
-        url = QUrl(UrlManager._baseUrl + "api.php")
+    def getSearchRequstUrl(userInput: str) -> QUrl:
+        url = QUrl(UrlManager._BASE_URL + "api.php")
         search = str(QUrl.toPercentEncoding(userInput), 'utf-8')
         params = {'action': 'query',
                   'list': 'search',

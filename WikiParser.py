@@ -1,15 +1,24 @@
 from PyQt5.QtWidgets import *
 from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
-from PyQt5.QtCore import QSize,Qt
+from PyQt5.QtCore import QSize, Qt
 from PyQt5.QtGui import *
 
 import json
+import logging
 
 from ResponsesWidget import ResponsesContainerWidget, Response
 from UrlManager import UrlManager
 
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'  # Define the format of the timestamp
+)
+
 
 class WikiParser(QMainWindow):
+    _WINDOW_SIZE = QSize(600, 400)                      # fixed, px
+
     def __init__(self):
         super().__init__()
 
@@ -17,13 +26,10 @@ class WikiParser(QMainWindow):
         self._exitBtn = QPushButton('×')
         self._minimizeBtn = QPushButton('—')
         self._searchLine = QLineEdit()
-        self._searchLine.setFocus()
         self._searchBtn = QPushButton("Search")
 
         self._resultsArea = QScrollArea()
-        
-
-        self._srw = ResponsesContainerWidget()
+        self._responcesContainer = ResponsesContainerWidget()
 
         self._searchBtn.clicked.connect(self._makeResponce)
         self._exitBtn.clicked.connect(lambda: QApplication.quit())
@@ -32,17 +38,35 @@ class WikiParser(QMainWindow):
 
         self._initUI()
 
-    def _initUI(self):
-        self.setWindowTitle("WikiFastSearch")
-        self.setFixedSize(600, 400)
+    def keyPressEvent(self, event):                     # override
+        if event.key() == Qt.Key_Escape:
+            logging.info("esc pressed, app quit")
+            QApplication.quit()
 
+        # drog n drop window functionality
+    def mousePressEvent(self, event):                   # override
+        if event.button() == Qt.LeftButton and self.centralWidget().rect().contains(event.pos()):
+            self.dragging = True
+            self.offset = event.pos()
+
+    def mouseMoveEvent(self, event):                    # override
+        if event.buttons() == Qt.LeftButton and self.dragging:
+            new_pos = self.mapToGlobal(event.pos() - self.offset)
+            self.move(new_pos)
+
+    def mouseReleaseEvent(self, event):                 # override
+        self.dragging = False
+
+    def _initUI(self):
+        ''' Добавляет элементы в layout; стилизует то, что не стилезуется в .qss '''
+
+        self.setWindowTitle("WikiFastSearch")
+        self.setFixedSize(WikiParser._WINDOW_SIZE)
+
+        self._searchBtn.setProperty("class", "searchBtn")
+        self._exitBtn.setProperty("class", "navBtn")
+        self._minimizeBtn.setProperty("class", "navBtn")
         self._resultsArea.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self._resultsArea.setFrameShape(QScrollArea.NoFrame)
-        self._exitBtn.setFixedSize(QSize(35,35))
-        self._exitBtn.setStyleSheet("background-color:#121212;font-size:24px; border:none;")
-        self._minimizeBtn.setFixedSize(QSize(35,35))
-        self._minimizeBtn.setStyleSheet("background-color:#121212;font-size:16px; border:none;")
-        self.setStyleSheet("font-size:14px")
 
         hlayout1 = QHBoxLayout()
         hlayout1.addWidget(self._errLabel)
@@ -53,6 +77,7 @@ class WikiParser(QMainWindow):
         hlayout2.addWidget(self._searchLine)
         hlayout2.addWidget(self._searchBtn)
         vlayout = QVBoxLayout()
+        vlayout.setProperty("class", "mainLayout")
         vlayout.addLayout(hlayout2)
         vlayout.addWidget(self._resultsArea)
         vlayout.addLayout(hlayout1)
@@ -65,58 +90,57 @@ class WikiParser(QMainWindow):
         self.setCentralWidget(widget)
         self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
 
-
     def _makeResponce(self):
-        self._srw.clear()
+        ''' отправляет get запрос на wiki, запрос формирует UrlManager '''
+
+        self._responcesContainer.clear()
         self._errLabel.clear()
+
         if (self._searchLine.text() == ""):
-            self._errLabel.setText("Empty responce")
+            self._errLabel.setText("Empty request")
 
         request = QNetworkRequest(
-            UrlManager.getSearchResponceUrl(self._searchLine.text()))
+            UrlManager.getSearchRequstUrl(self._searchLine.text()))
+
+        logging.info(f"creating request: \
+                {UrlManager.getSearchRequstUrl(self._searchLine.text())}")
 
         self.nam = QNetworkAccessManager()
         self.nam.finished.connect(self._handleResponse)
         self.nam.get(request)
 
+        # TODO: add connection ckecking
+        # if self.nam.networkAccessible != QNetworkAccessManager.Accessible:
+        #     self._errLabel.setText("no connection")
+
     def _handleResponse(self, reply):
+        ''' обрабатывает ответ, передает в self._parseJson '''
+
         if reply.error() == QNetworkReply.NoError:
             data = reply.readAll()
             self._parseJson(data.data())
         else:
-            self._errLabel.setText("Error: " + reply.errorString())
+            self._errLabel.setText("Sorry, error on our side")
+            logging.error("Error: " + reply.errorString())
 
     def _parseJson(self, data):
+        ''' извлекает из данных информацию для _responcesContainer (QWidget) '''
+
         try:
             parsed_data = json.loads(data)
-            for response in parsed_data['query']['search']:
-                self._srw.addResult(Response(response['title'],
-                                                 response['timestamp'],
-                                                 response['snippet'],
-                                                 UrlManager.createPageUrl(response['pageid'])))
+            logging.info(
+                f"response received, wiki json has {len(parsed_data['query']['search'])} items")
+
+            for jsonData in parsed_data['query']['search']:
+                self._responcesContainer.addResponse(Response(jsonData['title'],
+                                                              jsonData['timestamp'],
+                                                              jsonData['snippet'],
+                                                              UrlManager.createPageUrl(jsonData['pageid'])))
             if not parsed_data['query']['search']:
                 self._errLabel.setText("Sorry, nothing was found")
             else:
-                self._resultsArea.setWidget(self._srw)
+                self._resultsArea.setWidget(self._responcesContainer)
 
         except Exception as e:
-            self._errLabel.setText(f"Error parsing JSON: {e}")
-
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Escape:
-            QApplication.quit()
-
-# drog n drop window functionality
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton and self.centralWidget().rect().contains(event.pos()):
-            self.dragging = True
-            self.offset = event.pos()
-
-    def mouseMoveEvent(self, event):
-        if event.buttons() == Qt.LeftButton and self.dragging:
-            new_pos = self.mapToGlobal(event.pos() - self.offset)
-            self.move(new_pos)
-
-    def mouseReleaseEvent(self, event):
-        self.dragging = False
-
+            self._errLabel.setText(f"Sorry, error on our side")
+            logging.error(f"Error parsing json {e}")

@@ -98,6 +98,7 @@ class WikiParser(QMainWindow):
 
         if (self._searchLine.text() == ""):
             self._errLabel.setText("Empty request")
+            return
 
         request = QNetworkRequest(
             UrlManager.getSearchRequstUrl(self._searchLine.text()))
